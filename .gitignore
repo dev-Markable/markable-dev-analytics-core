@@ -1,24 +1,41 @@
-# Compiled class file
-*.class
+/.gradle
+/.svn
+/.idea
+/.run
+/*.iml
+/**/*.iml
+/**/*.log
+/assembly-prd/prd-persistent
+bo/bo/
+mvn.bat
+test.sh
+# Eclipse
+.classpath
+.project
+.settings/
+.metadata/
 
-# Log file
-*.log
+# Intellij
+.idea/
+.run/
+*.iml
+*.iws
+*.list
 
-# BlueJ files
-*.ctxt
+# VSCode
+.vscode/
 
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
+# Mac
+.DS_Store
 
-# Package Files #
-*.jar
-*.war
-*.nar
-*.ear
-*.zip
-*.tar.gz
-*.rar
-
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
+# Maven
+log/
+target/
+*.project
+maven-repo/
+../bo@tmp/
+bo@tmp/
+tmp/*
+**/*.deb
+ci-files/temp/*
+ci-files/data/*
