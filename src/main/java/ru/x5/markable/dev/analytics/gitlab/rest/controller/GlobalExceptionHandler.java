@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.gitlab.rest;
+package ru.x5.markable.dev.analytics.gitlab.rest.controller;
 
 import java.util.HashMap;
 import java.util.Map;
