@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.persistence.entity;
+package ru.x5.markable.dev.analytics.gitlab.persistence.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

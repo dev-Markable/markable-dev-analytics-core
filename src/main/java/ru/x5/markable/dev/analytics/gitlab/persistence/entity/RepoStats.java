@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.persistence.entity;
+package ru.x5.markable.dev.analytics.gitlab.persistence.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -15,17 +15,17 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "author_stats",
+@Table(name = "repo_stats",
         indexes = {
-                @Index(name = "idx_author_analysis", columnList = "analysis_id"),
-                @Index(name = "idx_author_email", columnList = "email")
+                @Index(name = "idx_repo_analysis", columnList = "analysis_id"),
+                @Index(name = "idx_repo_name", columnList = "repository_name")
         })
 @Getter
 @Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AuthorStats {
+public class RepoStats {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -33,6 +33,9 @@ public class AuthorStats {
 
     @Column(name = "analysis_id", nullable = false)
     private UUID analysisId;
+
+    @Column(name = "repository_name", nullable = false)
+    private String repositoryName;
 
     @Column(nullable = false)
     private String email;
@@ -46,4 +49,3 @@ public class AuthorStats {
     @Column(name = "deleted_lines", nullable = false)
     private Long deletedLines;
 }
-

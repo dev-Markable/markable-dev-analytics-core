@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.git;
+package ru.x5.markable.dev.analytics.gitlab.git;
 
 import java.io.BufferedReader;
 import java.io.IOException;

@@ -21,6 +21,13 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: 6379
-
+git:
+  repositories:
+    - https://scm.x5.ru/gkr/xrg-core.git
+    - https://scm.x5.ru/gkr/xrg-markable.git
+    - https://scm.x5.ru/gkpl/logistics-service.git
+    - https://scm.x5.ru/gkpl/pricing-service.git
+    - https://scm.x5.ru/gkpl/platform-service.git
+    - https://scm.x5.ru/gkpl/bo-oas.git
 server:
   port: 8080

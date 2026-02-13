@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.persistence.entity;
+package ru.x5.markable.dev.analytics.gitlab.persistence.entity;
 
 public enum AnalysisStatus {
     RUNNING,

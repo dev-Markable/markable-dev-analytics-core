@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.model;
+package ru.x5.markable.dev.analytics.gitlab.model;
 
 import java.util.HashSet;
 import java.util.Set;

@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.rest.dto;
+package ru.x5.markable.dev.analytics.gitlab.rest.dto;
 
 import lombok.Data;
 import org.springframework.http.HttpStatus;

@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.service;
+package ru.x5.markable.dev.analytics.gitlab.service;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -13,15 +13,16 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import ru.x5.markable.dev.analytics.git.GitClient;
-import ru.x5.markable.dev.analytics.persistence.entity.AnalysisRun;
-import ru.x5.markable.dev.analytics.persistence.entity.AnalysisStatus;
-import ru.x5.markable.dev.analytics.persistence.entity.AuthorStats;
-import ru.x5.markable.dev.analytics.persistence.entity.RepoStats;
-import ru.x5.markable.dev.analytics.persistence.repository.AnalysisRunRepository;
-import ru.x5.markable.dev.analytics.persistence.repository.AuthorStatsRepository;
-import ru.x5.markable.dev.analytics.persistence.repository.RepoStatsRepository;
-import ru.x5.markable.dev.analytics.rest.dto.AnalysisRequest;
+import ru.x5.markable.dev.analytics.gitlab.config.GitProperties;
+import ru.x5.markable.dev.analytics.gitlab.git.GitClient;
+import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AnalysisRun;
+import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AnalysisStatus;
+import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AuthorStats;
+import ru.x5.markable.dev.analytics.gitlab.persistence.entity.RepoStats;
+import ru.x5.markable.dev.analytics.gitlab.persistence.repository.AnalysisRunRepository;
+import ru.x5.markable.dev.analytics.gitlab.persistence.repository.AuthorStatsRepository;
+import ru.x5.markable.dev.analytics.gitlab.persistence.repository.RepoStatsRepository;
+import ru.x5.markable.dev.analytics.gitlab.rest.dto.AnalysisRequest;
 
 @Service
 @RequiredArgsConstructor
@@ -31,6 +32,7 @@ public class AnalysisService {
     private final AnalysisRunRepository analysisRunRepository;
     private final AuthorStatsRepository authorStatsRepository;
     private final RepoStatsRepository repoStatsRepository;
+    private final GitProperties gitProperties;
 
     private final Executor analysisExecutor;
 
@@ -59,7 +61,7 @@ public class AnalysisService {
             Map<String, AuthorAggregate> globalStats = new ConcurrentHashMap<>();
 
             List<CompletableFuture<Void>> futures =
-                    request.getRepositories().stream()
+                    gitProperties.getRepositories().stream()
                             .map(repo ->
                                     CompletableFuture.runAsync(() ->
                                                     processRepository(repo, request, analysisId, globalStats),
@@ -161,8 +163,7 @@ public class AnalysisService {
     }
 
     @Transactional
-    protected void saveAggregatedStats(UUID analysisId,
-            Map<String, AuthorAggregate> globalStats) {
+    protected void saveAggregatedStats(UUID analysisId, Map<String, AuthorAggregate> globalStats) {
 
         List<AuthorStats> entities =
                 globalStats.values().stream()

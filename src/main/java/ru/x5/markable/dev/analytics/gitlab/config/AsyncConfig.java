@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.config;
+package ru.x5.markable.dev.analytics.gitlab.config;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;

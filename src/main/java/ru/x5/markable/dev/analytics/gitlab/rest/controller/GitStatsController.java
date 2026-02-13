@@ -1,4 +1,4 @@
-package ru.x5.markable.dev.analytics.rest.controller;
+package ru.x5.markable.dev.analytics.gitlab.rest.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
