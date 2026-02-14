@@ -145,6 +145,7 @@ public class AnalysisServiceImpl implements AnalysisService {
 
         Map<String, AuthorAggregate> repoStats = new HashMap<>();
         String currentEmail = null;
+        boolean currentCommitIsMerge;
 
         for (String rawLine : lines) {
 
@@ -157,42 +158,76 @@ public class AnalysisServiceImpl implements AnalysisService {
             // EMAIL = новый commit
             if (!line.contains("\t") && line.contains("@")) {
 
-                currentEmail = line.toLowerCase();
+                String[] parts = line.split("\\|");
 
-                repoStats.merge(
-                        currentEmail,
-                        new AuthorAggregate(currentEmail, 1, 0, 0),
-                        AuthorAggregate::merge
-                );
+                currentEmail = parts[0].trim().toLowerCase();
+                currentCommitIsMerge =
+                        parts.length > 1 &&
+                                parts[1] != null &&
+                                parts[1].trim().contains(" ");
+
+                boolean finalCurrentCommitIsMerge = currentCommitIsMerge;
+
+                repoStats.compute(currentEmail, (email, aggregate) -> {
+
+                    if (aggregate == null) {
+                        aggregate = new AuthorAggregate(email);
+                    }
+
+                    return aggregate.addCommit(finalCurrentCommitIsMerge);
+                });
 
                 continue;
             }
 
             // NUMSTAT
-            if (line.contains("\t") && currentEmail != null) {
+            if (currentEmail != null && line.contains("\t")) {
 
                 String[] parts = line.split("\t");
 
-                if (parts.length == 3
-                        && parts[0].matches("[0-9-]+")
-                        && parts[1].matches("[0-9-]+")) {
-
-                    long added = parts[0].equals("-") ? 0 : Long.parseLong(parts[0]);
-                    long deleted = parts[1].equals("-") ? 0 : Long.parseLong(parts[1]);
-
-                    repoStats.computeIfPresent(currentEmail,
-                            (email, stat) ->
-                                    new AuthorAggregate(
-                                            email,
-                                            stat.commits(),
-                                            stat.added() + added,
-                                            stat.deleted() + deleted
-                                    ));
+                if (parts.length < 3) {
+                    continue;
                 }
+
+                // бинарные файлы отображаются как "-"
+                if (parts[0].equals("-") || parts[1].equals("-")) {
+                    continue;
+                }
+
+                long added;
+                long deleted;
+
+                try {
+                    added = Long.parseLong(parts[0]);
+                    deleted = Long.parseLong(parts[1]);
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+
+                String fileName = parts[2];
+
+                boolean isTestFile = isTestFile(fileName);
+
+                repoStats.computeIfPresent(currentEmail, (email, aggregate) ->
+                        aggregate.addLines(added, deleted, isTestFile)
+                );
             }
         }
 
         return repoStats;
+    }
+
+    private boolean isTestFile(String fileName) {
+
+        if (fileName == null) {
+            return false;
+        }
+
+        String lower = fileName.toLowerCase();
+
+        return lower.contains("/test/")
+                || lower.endsWith("test.java")
+                || lower.endsWith("tests.java");
     }
 
     // ============================================================
@@ -210,9 +245,11 @@ public class AnalysisServiceImpl implements AnalysisService {
                                 .analysisId(analysisId)
                                 .repositoryName(repoName)
                                 .email(stat.email())
+                                .mergeCommits(stat.mergeCommits())
                                 .commits(stat.commits())
                                 .addedLines(stat.added())
                                 .deletedLines(stat.deleted())
+                                .testAddedLines(stat.testAdded())
                                 .build())
                         .toList();
 
@@ -228,9 +265,11 @@ public class AnalysisServiceImpl implements AnalysisService {
                         .map(stat -> AuthorStats.builder()
                                 .analysisId(analysisId)
                                 .email(stat.email())
+                                .mergeCommits(stat.mergeCommits())
                                 .commits(stat.commits())
                                 .addedLines(stat.added())
                                 .deletedLines(stat.deleted())
+                                .testAddedLines(stat.testAdded())
                                 .build())
                         .toList();
 

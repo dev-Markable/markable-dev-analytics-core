@@ -61,6 +61,11 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
+                  name: merge_commits
+                  type: BIGINT
+                  constraints:
+                    nullable: true
+              - column:
                   name: commits
                   type: BIGINT
                   constraints:
@@ -75,6 +80,11 @@ databaseChangeLog:
                   type: BIGINT
                   constraints:
                     nullable: false
+              - column:
+                  name: test_added_lines
+                  type: BIGINT
+                  constraints:
+                    nullable: true
 
         - createIndex:
             indexName: idx_author_analysis
@@ -118,6 +128,11 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
+                  name: merge_commits
+                  type: BIGINT
+                  constraints:
+                    nullable: true
+              - column:
                   name: commits
                   type: BIGINT
                   constraints:
@@ -132,6 +147,11 @@ databaseChangeLog:
                   type: BIGINT
                   constraints:
                     nullable: false
+              - column:
+                  name: test_added_lines
+                  type: BIGINT
+                  constraints:
+                    nullable: true
 
         - createIndex:
             indexName: idx_repo_analysis
