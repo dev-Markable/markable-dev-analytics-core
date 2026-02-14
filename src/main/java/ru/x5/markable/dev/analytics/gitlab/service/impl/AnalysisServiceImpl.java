@@ -1,14 +1,10 @@
 package ru.x5.markable.dev.analytics.gitlab.service.impl;
 
-import java.nio.file.Path;
-import java.time.LocalDateTime;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.scheduling.annotation.Async;
@@ -27,6 +23,11 @@ import ru.x5.markable.dev.analytics.gitlab.persistence.repository.RepoStatsRepos
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.AnalysisRequest;
 import ru.x5.markable.dev.analytics.gitlab.service.AnalysisService;
 
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+
 @Service
 @Log4j2
 @RequiredArgsConstructor
@@ -37,12 +38,18 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final AuthorStatsRepository authorStatsRepository;
     private final RepoStatsRepository repoStatsRepository;
     private final GitProperties gitProperties;
-
     private final Executor analysisExecutor;
+
+    // ============================================================
+    // START
+    // ============================================================
 
     @Override
     @Transactional
     public UUID startAnalysis(AnalysisRequest request) {
+
+        log.info("Starting analysis. Period: {} - {}",
+                request.getSince(), request.getUntil());
 
         AnalysisRun run = AnalysisRun.builder()
                 .startedAt(LocalDateTime.now())
@@ -53,105 +60,149 @@ public class AnalysisServiceImpl implements AnalysisService {
 
         analysisRunRepository.save(run);
 
-        runAsync(run.getId(), request);
+        executeAsync(run.getId(), request);
 
         return run.getId();
     }
 
+    // ============================================================
+    // ASYNC EXECUTION (ОДИН уровень async)
+    // ============================================================
+
     @Async("analysisExecutor")
-    protected void runAsync(UUID analysisId, AnalysisRequest request) {
+    protected void executeAsync(UUID analysisId, AnalysisRequest request) {
+
+        long totalStart = System.currentTimeMillis();
 
         try {
 
-            Map<String, AuthorAggregate> globalStats = new ConcurrentHashMap<>();
+            Map<String, AuthorAggregate> globalStats =
+                    new ConcurrentHashMap<>();
 
-            List<CompletableFuture<Void>> futures =
-                    gitProperties.getRepositories().stream()
-                            .map(repo ->
-                                    CompletableFuture.runAsync(() ->
-                                                    processRepository(repo, request, analysisId, globalStats),
-                                            analysisExecutor))
-                            .toList();
+            log.info("Processing {} repositories",
+                    gitProperties.getRepositories().size());
 
-            CompletableFuture.allOf(
-                    futures.toArray(new CompletableFuture[0])
-            ).join();
+            for (String repoUrl : gitProperties.getRepositories()) {
+                processRepository(repoUrl, request, analysisId, globalStats);
+            }
 
             saveAggregatedStats(analysisId, globalStats);
-
             markSuccess(analysisId);
+
+            log.info("Analysis {} completed in {} ms",
+                    analysisId,
+                    System.currentTimeMillis() - totalStart);
 
         } catch (Exception e) {
             markFailed(analysisId, e.getMessage());
-            log.error(e.getMessage(), e);
+            log.error("Analysis {} failed", analysisId, e);
         }
     }
+
+    // ============================================================
+    // REPOSITORY PROCESSING
+    // ============================================================
 
     private void processRepository(String repoUrl,
             AnalysisRequest request,
             UUID analysisId,
-            Map<String, AuthorAggregate> globalStats) {
+            Map<String, AuthorAggregate> globalStats) throws IOException, InterruptedException {
 
-        try {
+        String repoName = extractRepoName(repoUrl);
 
-            Path repoPath = gitClient.prepareRepository(repoUrl);
+        long start = System.currentTimeMillis();
 
-            List<String> lines =
-                    gitClient.collectStats(repoPath,
-                            request.getSince(),
-                            request.getUntil());
+        log.info("Processing repository [{}]", repoName);
 
-            parseGitOutput(lines, repoUrl, analysisId, globalStats);
+        Path repoPath = gitClient.prepareRepository(repoUrl);
 
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        List<String> lines =
+                gitClient.collectStats(repoPath,
+                        request.getSince(),
+                        request.getUntil());
+
+        log.info("Git returned {} lines for repo {}",
+                lines.size(), repoName);
+
+        Map<String, AuthorAggregate> repoStats =
+                parseGitOutput(lines);
+
+        saveRepoStats(repoName, analysisId, repoStats);
+
+        repoStats.forEach((email, stat) ->
+                globalStats.merge(email, stat, AuthorAggregate::merge));
+
+        log.info("Repository [{}] processed in {} ms",
+                repoName,
+                System.currentTimeMillis() - start);
     }
 
-    private void parseGitOutput(List<String> lines,
-            String repoUrl,
-            UUID analysisId,
-            Map<String, AuthorAggregate> globalStats) {
+    // ============================================================
+    // GIT OUTPUT PARSER (1 commit = 1 email строка)
+    // ============================================================
 
-        String currentEmail = null;
+    private Map<String, AuthorAggregate> parseGitOutput(List<String> lines) {
 
         Map<String, AuthorAggregate> repoStats = new HashMap<>();
+        String currentEmail = null;
 
-        for (String line : lines) {
+        for (String rawLine : lines) {
 
-            if (line.contains("@") && !line.contains("\t")) {
-                currentEmail = line.trim().toLowerCase();
-                repoStats.putIfAbsent(currentEmail, new AuthorAggregate(currentEmail));
+            if (rawLine == null) continue;
+
+            String line = rawLine.trim();
+
+            if (line.isEmpty()) continue;
+
+            // EMAIL = новый commit
+            if (!line.contains("\t") && line.contains("@")) {
+
+                currentEmail = line.toLowerCase();
+
+                repoStats.merge(
+                        currentEmail,
+                        new AuthorAggregate(currentEmail, 1, 0, 0),
+                        AuthorAggregate::merge
+                );
+
                 continue;
             }
 
-            if (line.contains("\t")) {
+            // NUMSTAT
+            if (line.contains("\t") && currentEmail != null) {
+
                 String[] parts = line.split("\t");
 
-                if (parts.length >= 2 && currentEmail != null) {
+                if (parts.length == 3
+                        && parts[0].matches("[0-9-]+")
+                        && parts[1].matches("[0-9-]+")) {
 
                     long added = parts[0].equals("-") ? 0 : Long.parseLong(parts[0]);
                     long deleted = parts[1].equals("-") ? 0 : Long.parseLong(parts[1]);
 
-                    repoStats.get(currentEmail).add(added, deleted);
+                    repoStats.computeIfPresent(currentEmail,
+                            (email, stat) ->
+                                    new AuthorAggregate(
+                                            email,
+                                            stat.commits(),
+                                            stat.added() + added,
+                                            stat.deleted() + deleted
+                                    ));
                 }
             }
         }
 
-        saveRepoStats(repoUrl, analysisId, repoStats);
-
-        repoStats.forEach((email, stat) ->
-                globalStats.computeIfAbsent(email, AuthorAggregate::new)
-                        .merge(stat));
+        return repoStats;
     }
 
+    // ============================================================
+    // SAVE METHODS
+    // ============================================================
+
     @Transactional
-    protected void saveRepoStats(String repoUrl,
+    protected void saveRepoStats(String repoName,
             UUID analysisId,
             Map<String, AuthorAggregate> repoStats) {
-
-        String repoName = repoUrl.substring(repoUrl.lastIndexOf("/") + 1)
-                .replace(".git", "");
 
         List<RepoStats> entities =
                 repoStats.values().stream()
@@ -169,7 +220,8 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Transactional
-    protected void saveAggregatedStats(UUID analysisId, Map<String, AuthorAggregate> globalStats) {
+    protected void saveAggregatedStats(UUID analysisId,
+            Map<String, AuthorAggregate> globalStats) {
 
         List<AuthorStats> entities =
                 globalStats.values().stream()
@@ -185,6 +237,10 @@ public class AnalysisServiceImpl implements AnalysisService {
         authorStatsRepository.saveAll(entities);
     }
 
+    // ============================================================
+    // STATUS
+    // ============================================================
+
     private void markSuccess(UUID id) {
         AnalysisRun run = analysisRunRepository.findById(id).orElseThrow();
         run.setStatus(AnalysisStatus.SUCCESS);
@@ -198,5 +254,10 @@ public class AnalysisServiceImpl implements AnalysisService {
         run.setErrorMessage(error);
         run.setFinishedAt(LocalDateTime.now());
         analysisRunRepository.save(run);
+    }
+
+    private String extractRepoName(String repoUrl) {
+        return repoUrl.substring(repoUrl.lastIndexOf("/") + 1)
+                .replace(".git", "");
     }
 }

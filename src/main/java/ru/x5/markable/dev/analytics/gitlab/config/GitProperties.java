@@ -11,4 +11,6 @@ import org.springframework.stereotype.Component;
 public class GitProperties {
 
     private List<String> repositories;
+    private String token;
+    private String cacheDirectory;
 }

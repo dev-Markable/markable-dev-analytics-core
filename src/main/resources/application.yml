@@ -9,7 +9,7 @@ spring:
   jpa:
     generate-ddl: false
     open-in-view: false
-    show-sql: true
+    show-sql: false
     hibernate:
       ddl-auto: none
 
@@ -29,5 +29,7 @@ git:
     - https://scm.x5.ru/gkpl/pricing-service.git
     - https://scm.x5.ru/gkpl/platform-service.git
     - https://scm.x5.ru/gkpl/bo-oas.git
+  token:
+  cache-directory:
 server:
   port: 8080
