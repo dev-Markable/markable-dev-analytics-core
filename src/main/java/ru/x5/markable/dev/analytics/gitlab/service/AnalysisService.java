@@ -5,6 +5,6 @@ import ru.x5.markable.dev.analytics.gitlab.rest.dto.AnalysisRequest;
 
 public interface AnalysisService {
 
-    public UUID startAnalysis(AnalysisRequest request);
+    void startAnalysis(AnalysisRequest request);
 
 }

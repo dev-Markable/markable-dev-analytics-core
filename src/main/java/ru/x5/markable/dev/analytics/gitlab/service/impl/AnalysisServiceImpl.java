@@ -5,12 +5,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.markable.dev.analytics.gitlab.config.GitProperties;
+import ru.x5.markable.dev.analytics.gitlab.exception.RepositoryAnalysisException;
+import ru.x5.markable.dev.analytics.gitlab.exception.StatisticsPersistenceException;
 import ru.x5.markable.dev.analytics.gitlab.git.GitClient;
 import ru.x5.markable.dev.analytics.gitlab.model.AuthorAggregate;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AnalysisRun;
@@ -40,16 +42,11 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final GitProperties gitProperties;
     private final Executor analysisExecutor;
 
-    // ============================================================
-    // START
-    // ============================================================
-
     @Override
     @Transactional
-    public UUID startAnalysis(AnalysisRequest request) {
+    public void startAnalysis(AnalysisRequest request) {
 
-        log.info("Starting analysis. Period: {} - {}",
-                request.getSince(), request.getUntil());
+        log.info("Starting analysis. Period: {} - {}", request.getSince(), request.getUntil());
 
         AnalysisRun run = AnalysisRun.builder()
                 .startedAt(LocalDateTime.now())
@@ -61,16 +58,9 @@ public class AnalysisServiceImpl implements AnalysisService {
         analysisRunRepository.save(run);
 
         executeAsync(run.getId(), request);
-
-        return run.getId();
     }
 
-    // ============================================================
-    // ASYNC EXECUTION (ОДИН уровень async)
-    // ============================================================
-
-    @Async("analysisExecutor")
-    protected void executeAsync(UUID analysisId, AnalysisRequest request) {
+    private void executeAsync(UUID analysisId, AnalysisRequest request) {
 
         long totalStart = System.currentTimeMillis();
 
@@ -79,12 +69,16 @@ public class AnalysisServiceImpl implements AnalysisService {
             Map<String, AuthorAggregate> globalStats =
                     new ConcurrentHashMap<>();
 
-            log.info("Processing {} repositories",
-                    gitProperties.getRepositories().size());
+            log.info("Processing {} repositories", gitProperties.getRepositories().size());
 
-            for (String repoUrl : gitProperties.getRepositories()) {
-                processRepository(repoUrl, request, analysisId, globalStats);
-            }
+            List<CompletableFuture<Void>> futures = gitProperties.getRepositories()
+                    .stream()
+                    .map(repo -> CompletableFuture.runAsync(
+                            () -> processRepositorySafely(repo, request, analysisId, globalStats),
+                            analysisExecutor))
+                    .toList();
+
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
             saveAggregatedStats(analysisId, globalStats);
             markSuccess(analysisId);
@@ -99,9 +93,20 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
     }
 
-    // ============================================================
-    // REPOSITORY PROCESSING
-    // ============================================================
+    private void processRepositorySafely(String repo,
+            AnalysisRequest request,
+            UUID analysisId,
+            Map<String, AuthorAggregate> globalStats) {
+
+        try {
+            processRepository(repo, request, analysisId, globalStats);
+        } catch (IOException e) {
+            throw new RepositoryAnalysisException(repo, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RepositoryAnalysisException(repo, e);
+        }
+    }
 
     private void processRepository(String repoUrl,
             AnalysisRequest request,
@@ -113,6 +118,7 @@ public class AnalysisServiceImpl implements AnalysisService {
         long start = System.currentTimeMillis();
 
         log.info("Processing repository [{}]", repoName);
+
 
         Path repoPath = gitClient.prepareRepository(repoUrl);
 
@@ -136,10 +142,6 @@ public class AnalysisServiceImpl implements AnalysisService {
                 repoName,
                 System.currentTimeMillis() - start);
     }
-
-    // ============================================================
-    // GIT OUTPUT PARSER (1 commit = 1 email строка)
-    // ============================================================
 
     private Map<String, AuthorAggregate> parseGitOutput(List<String> lines) {
 
@@ -230,34 +232,31 @@ public class AnalysisServiceImpl implements AnalysisService {
                 || lower.endsWith("tests.java");
     }
 
-    // ============================================================
-    // SAVE METHODS
-    // ============================================================
-
-    @Transactional
-    protected void saveRepoStats(String repoName,
+    private void saveRepoStats(String repoName,
             UUID analysisId,
             Map<String, AuthorAggregate> repoStats) {
+        try {
+            List<RepoStats> entities =
+                    repoStats.values().stream()
+                            .map(stat -> RepoStats.builder()
+                                    .analysisId(analysisId)
+                                    .repositoryName(repoName)
+                                    .email(stat.email())
+                                    .mergeCommits(stat.mergeCommits())
+                                    .commits(stat.commits())
+                                    .addedLines(stat.added())
+                                    .deletedLines(stat.deleted())
+                                    .testAddedLines(stat.testAdded())
+                                    .build())
+                            .toList();
 
-        List<RepoStats> entities =
-                repoStats.values().stream()
-                        .map(stat -> RepoStats.builder()
-                                .analysisId(analysisId)
-                                .repositoryName(repoName)
-                                .email(stat.email())
-                                .mergeCommits(stat.mergeCommits())
-                                .commits(stat.commits())
-                                .addedLines(stat.added())
-                                .deletedLines(stat.deleted())
-                                .testAddedLines(stat.testAdded())
-                                .build())
-                        .toList();
-
-        repoStatsRepository.saveAll(entities);
+            repoStatsRepository.saveAll(entities);
+        } catch (Exception e) {
+            throw new StatisticsPersistenceException(e);
+        }
     }
 
-    @Transactional
-    protected void saveAggregatedStats(UUID analysisId,
+    private void saveAggregatedStats(UUID analysisId,
             Map<String, AuthorAggregate> globalStats) {
 
         List<AuthorStats> entities =
@@ -275,10 +274,6 @@ public class AnalysisServiceImpl implements AnalysisService {
 
         authorStatsRepository.saveAll(entities);
     }
-
-    // ============================================================
-    // STATUS
-    // ============================================================
 
     private void markSuccess(UUID id) {
         AnalysisRun run = analysisRunRepository.findById(id).orElseThrow();
