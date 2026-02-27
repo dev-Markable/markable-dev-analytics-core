@@ -5,12 +5,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.markable.dev.analytics.gitlab.config.GitProperties;
+import ru.x5.markable.dev.analytics.gitlab.exception.RepositoryAnalysisException;
+import ru.x5.markable.dev.analytics.gitlab.exception.StatisticsPersistenceException;
 import ru.x5.markable.dev.analytics.gitlab.git.GitClient;
 import ru.x5.markable.dev.analytics.gitlab.model.AuthorAggregate;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AnalysisRun;
@@ -40,16 +42,11 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final GitProperties gitProperties;
     private final Executor analysisExecutor;
 
-    // ============================================================
-    // START
-    // ============================================================
-
     @Override
     @Transactional
-    public UUID startAnalysis(AnalysisRequest request) {
+    public List<AuthorStats> startAnalysis(AnalysisRequest request) {
 
-        log.info("Starting analysis. Period: {} - {}",
-                request.getSince(), request.getUntil());
+        log.info("Starting analysis. Period: {} - {}", request.getSince(), request.getUntil());
 
         AnalysisRun run = AnalysisRun.builder()
                 .startedAt(LocalDateTime.now())
@@ -60,17 +57,10 @@ public class AnalysisServiceImpl implements AnalysisService {
 
         analysisRunRepository.save(run);
 
-        executeAsync(run.getId(), request);
-
-        return run.getId();
+       return executeAsync(run.getId(), request);
     }
 
-    // ============================================================
-    // ASYNC EXECUTION (ОДИН уровень async)
-    // ============================================================
-
-    @Async("analysisExecutor")
-    protected void executeAsync(UUID analysisId, AnalysisRequest request) {
+    private List<AuthorStats> executeAsync(UUID analysisId, AnalysisRequest request) {
 
         long totalStart = System.currentTimeMillis();
 
@@ -79,29 +69,47 @@ public class AnalysisServiceImpl implements AnalysisService {
             Map<String, AuthorAggregate> globalStats =
                     new ConcurrentHashMap<>();
 
-            log.info("Processing {} repositories",
-                    gitProperties.getRepositories().size());
+            log.info("Processing {} repositories", gitProperties.getRepositories().size());
 
-            for (String repoUrl : gitProperties.getRepositories()) {
-                processRepository(repoUrl, request, analysisId, globalStats);
-            }
+            List<CompletableFuture<Void>> futures = gitProperties.getRepositories()
+                    .stream()
+                    .map(repo -> CompletableFuture.runAsync(
+                            () -> processRepositorySafely(repo, request, analysisId, globalStats),
+                            analysisExecutor))
+                    .toList();
 
-            saveAggregatedStats(analysisId, globalStats);
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+            List<AuthorStats> aggregatedStats = saveAggregatedStats(analysisId, globalStats);
             markSuccess(analysisId);
 
             log.info("Analysis {} completed in {} ms",
                     analysisId,
                     System.currentTimeMillis() - totalStart);
 
+            return aggregatedStats;
+
         } catch (Exception e) {
             markFailed(analysisId, e.getMessage());
             log.error("Analysis {} failed", analysisId, e);
         }
+        return null;
     }
 
-    // ============================================================
-    // REPOSITORY PROCESSING
-    // ============================================================
+    private void processRepositorySafely(String repo,
+            AnalysisRequest request,
+            UUID analysisId,
+            Map<String, AuthorAggregate> globalStats) {
+
+        try {
+            processRepository(repo, request, analysisId, globalStats);
+        } catch (IOException e) {
+            throw new RepositoryAnalysisException(repo, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RepositoryAnalysisException(repo, e);
+        }
+    }
 
     private void processRepository(String repoUrl,
             AnalysisRequest request,
@@ -113,6 +121,7 @@ public class AnalysisServiceImpl implements AnalysisService {
         long start = System.currentTimeMillis();
 
         log.info("Processing repository [{}]", repoName);
+
 
         Path repoPath = gitClient.prepareRepository(repoUrl);
 
@@ -137,14 +146,11 @@ public class AnalysisServiceImpl implements AnalysisService {
                 System.currentTimeMillis() - start);
     }
 
-    // ============================================================
-    // GIT OUTPUT PARSER (1 commit = 1 email строка)
-    // ============================================================
-
     private Map<String, AuthorAggregate> parseGitOutput(List<String> lines) {
 
         Map<String, AuthorAggregate> repoStats = new HashMap<>();
         String currentEmail = null;
+        boolean currentCommitIsMerge;
 
         for (String rawLine : lines) {
 
@@ -157,70 +163,103 @@ public class AnalysisServiceImpl implements AnalysisService {
             // EMAIL = новый commit
             if (!line.contains("\t") && line.contains("@")) {
 
-                currentEmail = line.toLowerCase();
+                String[] parts = line.split("\\|");
 
-                repoStats.merge(
-                        currentEmail,
-                        new AuthorAggregate(currentEmail, 1, 0, 0),
-                        AuthorAggregate::merge
-                );
+                currentEmail = parts[0].trim().toLowerCase();
+                currentCommitIsMerge =
+                        parts.length > 1 &&
+                                parts[1] != null &&
+                                parts[1].trim().contains(" ");
+
+                boolean finalCurrentCommitIsMerge = currentCommitIsMerge;
+
+                repoStats.compute(currentEmail, (email, aggregate) -> {
+
+                    if (aggregate == null) {
+                        aggregate = new AuthorAggregate(email);
+                    }
+
+                    return aggregate.addCommit(finalCurrentCommitIsMerge);
+                });
 
                 continue;
             }
 
             // NUMSTAT
-            if (line.contains("\t") && currentEmail != null) {
+            if (currentEmail != null && line.contains("\t")) {
 
                 String[] parts = line.split("\t");
 
-                if (parts.length == 3
-                        && parts[0].matches("[0-9-]+")
-                        && parts[1].matches("[0-9-]+")) {
-
-                    long added = parts[0].equals("-") ? 0 : Long.parseLong(parts[0]);
-                    long deleted = parts[1].equals("-") ? 0 : Long.parseLong(parts[1]);
-
-                    repoStats.computeIfPresent(currentEmail,
-                            (email, stat) ->
-                                    new AuthorAggregate(
-                                            email,
-                                            stat.commits(),
-                                            stat.added() + added,
-                                            stat.deleted() + deleted
-                                    ));
+                if (parts.length < 3) {
+                    continue;
                 }
+
+                // бинарные файлы отображаются как "-"
+                if (parts[0].equals("-") || parts[1].equals("-")) {
+                    continue;
+                }
+
+                long added;
+                long deleted;
+
+                try {
+                    added = Long.parseLong(parts[0]);
+                    deleted = Long.parseLong(parts[1]);
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+
+                String fileName = parts[2];
+
+                boolean isTestFile = isTestFile(fileName);
+
+                repoStats.computeIfPresent(currentEmail, (email, aggregate) ->
+                        aggregate.addLines(added, deleted, isTestFile)
+                );
             }
         }
 
         return repoStats;
     }
 
-    // ============================================================
-    // SAVE METHODS
-    // ============================================================
+    private boolean isTestFile(String fileName) {
 
-    @Transactional
-    protected void saveRepoStats(String repoName,
-            UUID analysisId,
-            Map<String, AuthorAggregate> repoStats) {
+        if (fileName == null) {
+            return false;
+        }
 
-        List<RepoStats> entities =
-                repoStats.values().stream()
-                        .map(stat -> RepoStats.builder()
-                                .analysisId(analysisId)
-                                .repositoryName(repoName)
-                                .email(stat.email())
-                                .commits(stat.commits())
-                                .addedLines(stat.added())
-                                .deletedLines(stat.deleted())
-                                .build())
-                        .toList();
+        String lower = fileName.toLowerCase();
 
-        repoStatsRepository.saveAll(entities);
+        return lower.contains("/test/")
+                || lower.endsWith("test.java")
+                || lower.endsWith("tests.java");
     }
 
-    @Transactional
-    protected void saveAggregatedStats(UUID analysisId,
+    private void saveRepoStats(String repoName,
+            UUID analysisId,
+            Map<String, AuthorAggregate> repoStats) {
+        try {
+            List<RepoStats> entities =
+                    repoStats.values().stream()
+                            .map(stat -> RepoStats.builder()
+                                    .analysisId(analysisId)
+                                    .repositoryName(repoName)
+                                    .email(stat.email())
+                                    .mergeCommits(stat.mergeCommits())
+                                    .commits(stat.commits())
+                                    .addedLines(stat.added())
+                                    .deletedLines(stat.deleted())
+                                    .testAddedLines(stat.testAdded())
+                                    .build())
+                            .toList();
+
+            repoStatsRepository.saveAll(entities);
+        } catch (Exception e) {
+            throw new StatisticsPersistenceException(e);
+        }
+    }
+
+    private List<AuthorStats> saveAggregatedStats(UUID analysisId,
             Map<String, AuthorAggregate> globalStats) {
 
         List<AuthorStats> entities =
@@ -228,18 +267,17 @@ public class AnalysisServiceImpl implements AnalysisService {
                         .map(stat -> AuthorStats.builder()
                                 .analysisId(analysisId)
                                 .email(stat.email())
+                                .mergeCommits(stat.mergeCommits())
                                 .commits(stat.commits())
                                 .addedLines(stat.added())
                                 .deletedLines(stat.deleted())
+                                .testAddedLines(stat.testAdded())
                                 .build())
                         .toList();
 
         authorStatsRepository.saveAll(entities);
+        return entities;
     }
-
-    // ============================================================
-    // STATUS
-    // ============================================================
 
     private void markSuccess(UUID id) {
         AnalysisRun run = analysisRunRepository.findById(id).orElseThrow();

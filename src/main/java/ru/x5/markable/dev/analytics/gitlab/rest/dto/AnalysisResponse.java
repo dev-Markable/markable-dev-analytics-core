@@ -1,6 +1,5 @@
 package ru.x5.markable.dev.analytics.gitlab.rest.dto;
 
-import java.util.UUID;
 import lombok.Builder;
 import lombok.Data;
 
@@ -8,6 +7,10 @@ import lombok.Data;
 @Builder
 public class AnalysisResponse {
 
-    private UUID analysisId;
-    private String status;
+    private String email;
+    long mergeCommits;
+    long commits;
+    long added;
+    long deleted;
+    long testAdded;
 }

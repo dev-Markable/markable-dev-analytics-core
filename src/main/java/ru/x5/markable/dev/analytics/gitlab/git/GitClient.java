@@ -65,7 +65,6 @@ public class GitClient {
         command.add("git");
         command.add("log");
         command.add("--all");
-//        command.add("--no-merges"); // если нужно исключать merge
 
         if (since != null) {
             command.add("--since=" + since);
@@ -75,7 +74,7 @@ public class GitClient {
             command.add("--until=" + until);
         }
 
-        command.add("--pretty=format:%ae");
+        command.add("--pretty=format:%ae|%P");
         command.add("--numstat");
 
         log.info("Executing git log in [{}] period: {} - {}",
@@ -143,7 +142,7 @@ public class GitClient {
         if (repoUrl.startsWith("https://")) {
             return repoUrl.replace(
                     "https://",
-                    "https://" + token + "@"
+                    "https://gitlab-ci-token:" + token + "@"
             );
         }
 

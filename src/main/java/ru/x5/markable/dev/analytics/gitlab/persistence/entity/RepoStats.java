@@ -40,6 +40,9 @@ public class RepoStats {
     @Column(nullable = false)
     private String email;
 
+    @Column(name = "merge_commits")
+    long mergeCommits;
+
     @Column(nullable = false)
     private Long commits;
 
@@ -48,4 +51,7 @@ public class RepoStats {
 
     @Column(name = "deleted_lines", nullable = false)
     private Long deletedLines;
+
+    @Column(name = "test_added_lines")
+    private Long testAddedLines;
 }
