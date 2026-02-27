@@ -142,7 +142,7 @@ public class GitClient {
         if (repoUrl.startsWith("https://")) {
             return repoUrl.replace(
                     "https://",
-                    "https://" + token + "@"
+                    "https://gitlab-ci-token:" + token + "@"
             );
         }
 

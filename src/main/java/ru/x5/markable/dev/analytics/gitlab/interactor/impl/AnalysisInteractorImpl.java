@@ -1,5 +1,6 @@
 package ru.x5.markable.dev.analytics.gitlab.interactor.impl;
 
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
@@ -8,6 +9,7 @@ import ru.x5.markable.dev.analytics.gitlab.exception.AnalysisException;
 import ru.x5.markable.dev.analytics.gitlab.exception.RepositoryAnalysisException;
 import ru.x5.markable.dev.analytics.gitlab.exception.StatisticsPersistenceException;
 import ru.x5.markable.dev.analytics.gitlab.interactor.AnalysisInteractor;
+import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AuthorStats;
 import ru.x5.markable.dev.analytics.gitlab.rest.dto.AnalysisRequest;
 import ru.x5.markable.dev.analytics.gitlab.service.AnalysisService;
 
@@ -23,9 +25,9 @@ public class AnalysisInteractorImpl implements AnalysisInteractor {
     private final AnalysisService analysisService;
 
     @Override
-    public void startAnalysis(AnalysisRequest request) {
+    public List<AuthorStats> startAnalysis(AnalysisRequest request) {
         try {
-            analysisService.startAnalysis(request);
+            return analysisService.startAnalysis(request);
         } catch (RepositoryAnalysisException e) {
             throw new UnprocessableEntityException(ANALYZE_REPOSITORY_ERROR, e.getRepository());
         } catch (StatisticsPersistenceException e) {

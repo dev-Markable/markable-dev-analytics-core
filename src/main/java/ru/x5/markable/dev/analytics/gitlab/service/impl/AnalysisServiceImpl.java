@@ -44,7 +44,7 @@ public class AnalysisServiceImpl implements AnalysisService {
 
     @Override
     @Transactional
-    public void startAnalysis(AnalysisRequest request) {
+    public List<AuthorStats> startAnalysis(AnalysisRequest request) {
 
         log.info("Starting analysis. Period: {} - {}", request.getSince(), request.getUntil());
 
@@ -57,10 +57,10 @@ public class AnalysisServiceImpl implements AnalysisService {
 
         analysisRunRepository.save(run);
 
-        executeAsync(run.getId(), request);
+       return executeAsync(run.getId(), request);
     }
 
-    private void executeAsync(UUID analysisId, AnalysisRequest request) {
+    private List<AuthorStats> executeAsync(UUID analysisId, AnalysisRequest request) {
 
         long totalStart = System.currentTimeMillis();
 
@@ -80,17 +80,20 @@ public class AnalysisServiceImpl implements AnalysisService {
 
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-            saveAggregatedStats(analysisId, globalStats);
+            List<AuthorStats> aggregatedStats = saveAggregatedStats(analysisId, globalStats);
             markSuccess(analysisId);
 
             log.info("Analysis {} completed in {} ms",
                     analysisId,
                     System.currentTimeMillis() - totalStart);
 
+            return aggregatedStats;
+
         } catch (Exception e) {
             markFailed(analysisId, e.getMessage());
             log.error("Analysis {} failed", analysisId, e);
         }
+        return null;
     }
 
     private void processRepositorySafely(String repo,
@@ -256,7 +259,7 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
     }
 
-    private void saveAggregatedStats(UUID analysisId,
+    private List<AuthorStats> saveAggregatedStats(UUID analysisId,
             Map<String, AuthorAggregate> globalStats) {
 
         List<AuthorStats> entities =
@@ -273,6 +276,7 @@ public class AnalysisServiceImpl implements AnalysisService {
                         .toList();
 
         authorStatsRepository.saveAll(entities);
+        return entities;
     }
 
     private void markSuccess(UUID id) {
