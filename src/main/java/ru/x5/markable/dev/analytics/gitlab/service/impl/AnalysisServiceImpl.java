@@ -1,13 +1,16 @@
 package ru.x5.markable.dev.analytics.gitlab.service.impl;
 
 import java.io.IOException;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.x5.markable.dev.analytics.gitlab.config.GitProperties;
@@ -29,6 +32,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import ru.x5.markable.dev.analytics.gitlab.service.ExportTrackerService;
 
 @Service
 @Log4j2
@@ -130,11 +134,9 @@ public class AnalysisServiceImpl implements AnalysisService {
                         request.getSince(),
                         request.getUntil());
 
-        log.info("Git returned {} lines for repo {}",
-                lines.size(), repoName);
+        log.info("Git returned {} lines for repo {}", lines.size(), repoName);
 
-        Map<String, AuthorAggregate> repoStats =
-                parseGitOutput(lines);
+        Map<String, AuthorAggregate> repoStats = parseGitOutput(lines);
 
         saveRepoStats(repoName, analysisId, repoStats);
 

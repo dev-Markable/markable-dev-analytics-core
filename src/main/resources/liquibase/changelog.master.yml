@@ -1,3 +1,7 @@
 databaseChangeLog:
   - include:
       file: liquibase/migration/001-init.yaml
+  - include:
+      file: liquibase/migration/002-create-last-export-tracker.yaml
+  - include:
+      file: liquibase/migration/003-create-daily-author-stats.yaml
