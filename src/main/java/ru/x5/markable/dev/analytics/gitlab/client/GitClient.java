@@ -1,5 +1,6 @@
-package ru.x5.markable.dev.analytics.gitlab.git;
+package ru.x5.markable.dev.analytics.gitlab.client;
 
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Component;
@@ -94,6 +95,30 @@ public class GitClient {
                 duration);
 
         return result;
+    }
+
+    public List<String> collectStats(
+            Path repoPath,
+            LocalDateTime since,
+            LocalDateTime until
+    ) throws IOException, InterruptedException {
+
+        List<String> command = new ArrayList<>();
+        command.add("git");
+        command.add("log");
+        command.add("--all");
+        command.add("--pretty=format:%H|%ae|%P|%ad|%s");
+        command.add("--date=iso-strict");
+        command.add("--numstat");
+
+        if (since != null) {
+            command.add("--since=\"" + since + "\"");
+        }
+        if (until != null) {
+            command.add("--until=\"" + until + "\"");
+        }
+
+        return execute(repoPath, command.toArray(new String[0]));
     }
 
     private List<String> execute(Path workingDir, String... command)

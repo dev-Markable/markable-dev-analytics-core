@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import ru.x5.markable.dev.analytics.gitlab.config.GitProperties;
 import ru.x5.markable.dev.analytics.gitlab.exception.RepositoryAnalysisException;
 import ru.x5.markable.dev.analytics.gitlab.exception.StatisticsPersistenceException;
-import ru.x5.markable.dev.analytics.gitlab.git.GitClient;
+import ru.x5.markable.dev.analytics.gitlab.client.GitClient;
 import ru.x5.markable.dev.analytics.gitlab.model.AuthorAggregate;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AnalysisRun;
 import ru.x5.markable.dev.analytics.gitlab.persistence.entity.AnalysisStatus;
@@ -130,11 +130,9 @@ public class AnalysisServiceImpl implements AnalysisService {
                         request.getSince(),
                         request.getUntil());
 
-        log.info("Git returned {} lines for repo {}",
-                lines.size(), repoName);
+        log.info("Git returned {} lines for repo {}", lines.size(), repoName);
 
-        Map<String, AuthorAggregate> repoStats =
-                parseGitOutput(lines);
+        Map<String, AuthorAggregate> repoStats = parseGitOutput(lines);
 
         saveRepoStats(repoName, analysisId, repoStats);
 
